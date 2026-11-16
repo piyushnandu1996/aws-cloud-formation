@@ -1,6 +1,212 @@
+
 AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Basic AWS VPC Infrastructure with Public and Private Subnets, NAT Gateway and Security Groups
+
 Resources:
-  MyBucket:
-    Type: AWS::S3::Bucket
+
+  # -----------------------------
+  # 1. VPC
+  # -----------------------------
+  MyVPC:
+    Type: AWS::EC2::VPC
     Properties:
-      BucketName: piyush-demo-bucket-12345
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: My-VPC
+
+  # -----------------------------
+  # 2. Internet Gateway
+  # -----------------------------
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: My-IGW
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  # -----------------------------
+  # 3. Public Subnet
+  # -----------------------------
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Public-Subnet
+
+  # -----------------------------
+  # 4. Private Subnet
+  # -----------------------------
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Private-Subnet
+
+  # -----------------------------
+  # 5. Elastic IP for NAT
+  # -----------------------------
+  NatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachInternetGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: NAT-EIP
+
+  # -----------------------------
+  # 6. NAT Gateway
+  # -----------------------------
+  MyNatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: AttachInternetGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: My-NAT-Gateway
+
+  # -----------------------------
+  # 7. Public Route Table
+  # -----------------------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: Public-RT
+
+  # Public route to Internet Gateway
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachInternetGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  PublicSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # -----------------------------
+  # 8. Private Route Table
+  # -----------------------------
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: Private-RT
+
+  # Private route through NAT Gateway
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: MyNatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNatGateway
+
+  PrivateSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  # -----------------------------
+  # 9. Public Security Group
+  # -----------------------------
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP and HTTPS traffic from internet
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: Public-SG
+
+  # -----------------------------
+  # 10. Private Security Group
+  # -----------------------------
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all inbound traffic only from VPC CIDR
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 10.0.0.0/16
+
+      Tags:
+        - Key: Name
+          Value: Private-SG
+
+# -----------------------------
+# 11. Outputs
+# -----------------------------
+Outputs:
+
+  VPCID:
+    Description: VPC ID
+    Value: !Ref MyVPC
+
+  PublicSubnetID:
+    Description: Public Subnet ID
+    Value: !Ref PublicSubnet
+
+  PrivateSubnetID:
+    Description: Private Subnet ID
+    Value: !Ref PrivateSubnet
+
+  NATGatewayID:
+    Description: NAT Gateway ID
+    Value: !Ref MyNatGateway
+
+  PublicSecurityGroupID:
+    Description: Public Security Group ID
+    Value: !Ref PublicSecurityGroup
+
+  PrivateSecurityGroupID:
+    Description: Private Security Group ID
+    Value: !Ref PrivateSecurityGroup
